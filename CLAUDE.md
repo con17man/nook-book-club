@@ -86,6 +86,9 @@ supabase/tests/                 PGlite harness + node:test workflow tests
 - `src/lib/database.types.ts` mirrors the schema — update it with every migration (or regenerate).
   App aliases (`Profile`, `BookEvent`, …) are in `src/lib/types.ts`.
 - Event times are entered/displayed in `NEXT_PUBLIC_CLUB_TIMEZONE`, stored as `timestamptz`.
+- `NEXT_PUBLIC_*` values are inlined at build time. Never leave a `.next/` build made with placeholder env
+  values: `npm run start` would silently talk to the wrong Supabase. Use `npm run dev` locally; rebuild
+  before `npm run start`.
 - Keep the MVP simple: one club, two roles, no realtime, no client-side Supabase.
 
 ## Not built yet / ideas

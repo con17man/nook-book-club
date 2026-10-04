@@ -1,6 +1,7 @@
 "use server";
 
 import type { EmailOtpType } from "@supabase/supabase-js";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { ActionState } from "@/lib/action-state";
@@ -8,6 +9,12 @@ import { sendEmail } from "@/lib/email/send";
 import { confirmLink, OTP_TYPES } from "@/lib/auth-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+
+/** The header (root layout) depends on who is signed in, so re-render it after auth changes. */
+function refreshLayoutAndRedirect(path: string): never {
+  revalidatePath("/", "layout");
+  redirect(path);
+}
 
 /** Keep redirects on our own site. */
 function safeNext(next: FormDataEntryValue | null) {
@@ -22,8 +29,12 @@ export async function signIn(_: ActionState, formData: FormData): Promise<Action
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
-  if (error) return { error: "Wrong email or password." };
-  redirect("/");
+  if (error?.code === "invalid_credentials") return { error: "Wrong email or password." };
+  if (error) {
+    console.error("[auth] sign-in failed", error);
+    return { error: "We couldn't sign you in right now. Please try again." };
+  }
+  refreshLayoutAndRedirect("/");
 }
 
 export async function requestPasswordReset(_: ActionState, formData: FormData): Promise<ActionState> {
@@ -34,7 +45,8 @@ export async function requestPasswordReset(_: ActionState, formData: FormData): 
   // Same answer whether or not the account exists.
   if (!error && data.properties) {
     const link = confirmLink(data.properties.hashed_token, "recovery", "/auth/set-password");
-    await sendEmail({ to: email.data, template: "password_reset", payload: { link } });
+    const sent = await sendEmail({ to: email.data, template: "password_reset", payload: { link } });
+    if (sent.error) console.error("[auth] password reset email failed", sent.error);
   }
   return { success: "If that email belongs to a member, a reset link is on its way." };
 }
@@ -50,7 +62,7 @@ export async function verifyEmailLink(_: ActionState, formData: FormData): Promi
   const supabase = await createClient();
   const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: type as EmailOtpType });
   if (error) return { error: "This link has expired or was already used. Ask the club admin for a new one." };
-  redirect(safeNext(formData.get("next")));
+  refreshLayoutAndRedirect(safeNext(formData.get("next")));
 }
 
 export async function setPassword(_: ActionState, formData: FormData): Promise<ActionState> {
@@ -78,5 +90,5 @@ export async function setPassword(_: ActionState, formData: FormData): Promise<A
 
   const { error } = await supabase.from("profiles").update({ full_name: parsed.data.fullName }).eq("id", userId);
   if (error) return { error: error.message };
-  redirect("/");
+  refreshLayoutAndRedirect("/");
 }
